@@ -1,29 +1,33 @@
 from fastapi import APIRouter, Response, status, HTTPException, Depends
 from datetime import datetime, timedelta
-from app.models.user import UserResponse, CreateUserSchema, LoginUserSchema, UserBaseSchema
-from app.db.database import User
-from app.services import utils
-from app.core.config import settings
-from app.serializers.userSerializers import userEntity, userResponseEntity
-from app.services.utils import get_current_user
+from app.models.user_schema import CreateUserSchema, LoginUserSchema, UserBaseSchema
+from app.db import User
+from app.core.auth import get_current_user, get_hashed_password, verify_password, create_access_token, create_refresh_token
+from config import settings
+from app.serializers.data_serialize import to_entity
+from app.models.response_schema import ResponseModel
 
 router = APIRouter()
 
 
 # [...] register user
-@router.post('/register', status_code=status.HTTP_201_CREATED, response_model=UserResponse)
+@router.post('/register', status_code=status.HTTP_201_CREATED, response_model=ResponseModel)
 async def create_user(payload: CreateUserSchema):
     # Check if user already exist
     user = User.find_one({'email': payload.email.lower()})
     if user:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail='Account already exist')
+        return ResponseModel(
+            status= False,
+            message= " Account already exist"
+        )
     # Compare password and passwordConfirm
     if payload.password != payload.passwordConfirm:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail='Passwords do not match')
+        return ResponseModel(
+            status= False,
+            message= "Passwords do not match."
+        )
     #  Hash the password
-    payload.password = utils.get_hashed_password(payload.password)
+    payload.password = get_hashed_password(payload.password)
     del payload.passwordConfirm
     payload.role = 'user'
     payload.verified = True
@@ -31,8 +35,17 @@ async def create_user(payload: CreateUserSchema):
     payload.created_at = datetime.utcnow()
     payload.updated_at = payload.created_at
     result = User.insert_one(payload.dict())
-    new_user = userResponseEntity(User.find_one({'_id': result.inserted_id}))
-    return {"status": "success", "user": new_user}
+    if not result.acknowledged:
+        return ResponseModel(
+            status=False,
+            message="Could not insert user to db."
+        )
+    new_user = to_entity(User.find_one({'_id': result.inserted_id}))
+    return ResponseModel(
+        status= True,
+        data=new_user,
+        message="Operation successful."
+    )
 
 
 # [...] login user
@@ -41,21 +54,26 @@ def login(payload: LoginUserSchema, response: Response):
     # Check if the user exist
     db_user = User.find_one({'email': payload.email.lower()})
     if not db_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail='Incorrect Email or Password')
-    user = userEntity(db_user)
+        return ResponseModel(
+            status= False,
+            message= "Incorrect Email."
+        )
+        
+    user = to_entity(db_user)
 
     # Check if the password is valid
-    if not utils.verify_password(payload.password, user['password']):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail='Incorrect Email or Password')
+    if not verify_password(payload.password, user['password']):
+        return ResponseModel(
+            status= False,
+            message= "Incorrect Password."
+        )
 
     # Create access token
-    access_token = utils.create_access_token(
+    access_token = create_access_token(
         subject=str(user["email"]), expires_time=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRES_IN))
 
     # Create refresh token
-    refresh_token = utils.create_refresh_token(
+    refresh_token = create_refresh_token(
         subject=str(user["email"]), expires_time=timedelta(minutes=settings.REFRESH_TOKEN_EXPIRES_IN))
 
     # Store refresh and access tokens in cookie
@@ -67,9 +85,19 @@ def login(payload: LoginUserSchema, response: Response):
                         settings.ACCESS_TOKEN_EXPIRES_IN, '/', None, False, False, 'lax')
 
     # Send both access
-    return {'status': 'success', 'access_token': access_token, 'refresh_token': refresh_token, 'token_type': 'Bearer'}
+    return ResponseModel(
+        status=True,
+        data= {
+            'access_token': access_token, 'refresh_token': refresh_token, 'token_type': 'Bearer'
+        },
+        message="Operation Successful."
+    )
 
 
-@router.get('/me', response_model=UserResponse)
+@router.get('/me', response_model=ResponseModel)
 def get_me(user: UserBaseSchema = Depends(get_current_user)):
-    return {"status": "success", "user": user}
+    return ResponseModel(
+        status=True,
+        data=user,
+        message="Operation Successful."
+    )

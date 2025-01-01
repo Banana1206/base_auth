@@ -7,9 +7,9 @@ from jose import jwt, JWTError
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from typing import Annotated, Union
 from fastapi import Depends, HTTPException, status
-from app.core.config import settings
-from app.db.database import User
-from app.models.user import TokenPayload, UserBaseSchema
+from config import settings
+from app.db import User
+from app.models.user_schema import TokenPayload, UserBaseSchema
 
 password_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_security = HTTPBearer()
@@ -73,7 +73,7 @@ async def get_current_user(access_token: HTTPAuthorizationCredentials = Depends(
     except (JWTError, ValidationError):
         raise credentials_exception
 
-    user = get_user(token_data.sub)
+    user = User.find_one({'email': token_data.sub})
 
     if user is None:
         raise credentials_exception

@@ -1,7 +1,7 @@
 from pymongo import mongo_client, ASCENDING
 from pymongo.errors import PyMongoError
 
-from app.core.config import settings
+from config import settings
 
 client = mongo_client.MongoClient(settings.MONGODB_URI)
 

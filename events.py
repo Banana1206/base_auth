@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.db.database import init_database, close_database
+from app.db import init_database, close_database
 
 
 def startup_event():
